@@ -22,12 +22,18 @@ class SBS2MessageLongPoller:
             'reverse': True,
             'limit': 1
         }
-        r = requests.get(
-            f'{self.api_url}Read/chain/?requests=comment-' +
-            json.dumps(comments_settings, separators=(',', ':')) +
-            '&requests=user.0createUserId&content.0parentId'
-        )
-        self.last_id = r.json()['comment'][0]['id']
+        # this is in case that the request times out
+        data = {}
+        try:
+            r = requests.get(
+                f'{self.api_url}Read/chain/?requests=comment-' +
+                json.dumps(comments_settings, separators=(',', ':')) +
+                '&requests=user.0createUserId&content.0parentId'
+            )
+            data = r.json()
+        except:
+            pass
+        self.last_id = data['comment'][0]['id']
     
     def run_forever(self):
         """Infinite event loop that will send data if successful"""
@@ -51,6 +57,7 @@ class SBS2:
         self.api_url = 'https://smilebasicsource.com/api/'
         self.users = {}
         self.rooms = {}
+        self.userid = 12
 
         self.message_ids = []
         self.tags = []
@@ -82,8 +89,27 @@ class SBS2:
     
     def poll_message(self, data):
         """Is run whenever a long poll is completed"""
+        # update users
+        self.users.update({
+            user['id']: user 
+            for user in data['chains']['user']
+        })
+        # update channels?
+        self.rooms.update({
+            content['id']: {}
+            for content in data['chains']['content']
+        })
+        self.on_userList(0)
+        # send messages to irc
         for i in data['chains']['comment']:
-            print(i['content'])
+            # remove newline if first line is JSON
+            if '\n' in i['content']:
+                try:
+                    msgdata = json.loads(i['content'][:i['content'].index('\n')])
+                    i['content'] = i['content'][i['content'].index('\n')+1:]
+                except json.decoder.JSONDecodeError:
+                    pass
+            self.on_message(i)
     
     def send_message(self, room_id, content):
         settings = {
@@ -102,11 +128,3 @@ class SBS2:
             }
         )
         pass
-
-# this was just for testing, this won't be how it's actually used
-sbs2 = SBS2()
-sbs2.authtoken = '[AUTH TOKEN]'
-sbs2.connect()
-
-while True:
-    pass
