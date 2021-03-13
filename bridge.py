@@ -3,7 +3,7 @@
 import traceback
 
 import irc
-import sbs
+import sbs2
 import decoders
 
 class Bridge:
@@ -27,7 +27,7 @@ class Bridge:
 		self.irc.on_PART = self.irc_on_PART
 		self.irc.on_PRIVMSG = self.irc_on_PRIVMSG
 
-		self.sbs = sbs.SBS()
+		self.sbs = sbs2.SBS2()
 		self.sbs.debug_traceback = self.debug_traceback
 		self.sbs.debug = self.debug
 		self.sbs.on_message = self.sbs_on_message
@@ -35,7 +35,7 @@ class Bridge:
 		self.sbs.on_response = self.sbs_on_response
 
 	def disconnect(self):
-		self.sbs.ws.close()
+		pass
 
 	def handle(self, line):
 		try:
@@ -65,17 +65,18 @@ class Bridge:
 			'End of /NAMES list')
 
 	def try_update_channels(self):
-		if not self.sbs.tags: return
+		# if not self.sbs.tags: return
 		if not self.sbs.users: return
 
 		# Update the channel list
 		old_channels = self.channels
-		self.channels = {
-			'#'+tag: self.sbs.online_users
-			for tag in self.sbs.tags
-		}
+		# self.channels = {
+		# 	'#'+tag: self.sbs.online_users
+		# 	for tag in self.sbs.tags
+		# }
+		self.channels = {}
 		self.channels.update({
-			'#'+name: users
+			'#'+str(name): users
 			for name, users in self.sbs.rooms.items()
 		})
 
@@ -92,18 +93,18 @@ class Bridge:
 		# Send client changes in user list for each channel
 		for channel in same:
 			# Users that exist who didn't before
-			for uid in self.channels[channel].difference(old_channels[channel]):
+			for uid in set(self.channels[channel]).difference(old_channels[channel]):
 				self.irc.send_cmd(self.fulluser(uid), 'JOIN', [channel])
 
 				# Apply appropriate user mode
 				user = self.sbs.users[uid]
-				if user['level'] == 1:
+				if user['super'] == True:
 					self.send_mode(channel, '+v', user['username'])
-				elif user['level'] > 1:
+				elif user['super'] == False:
 					self.send_mode(channel, '+o', user['username'])
 
 			# Users that don't exist who did before
-			for uid in old_channels[channel].difference(self.channels[channel]):
+			for uid in set(old_channels[channel]).difference(self.channels[channel]):
 				self.irc.send_cmd(self.fulluser(uid), 'PART', [channel])
 
 		# TODO: only join channels where client is in user list
@@ -112,6 +113,7 @@ class Bridge:
 		self.try_join_client()
 
 	def try_join_client(self):
+
 		if not self.channels: return
 		if not self.tojoin: return
 
@@ -132,22 +134,15 @@ class Bridge:
 			self.send_names(channel)
 		self.tojoin.clear()
 
-		# TODO: find a more appropriate time to call this?
-		# In case it hasn't been requested before, request the message list
-		if joinedsome:
-			self.sbs.ws_send({
-				"type": "request",
-				"request": "messageList"
-			})
-
 	def fulluser(self, userid):
 		# TODO: better name for this method
 		user = self.sbs.users[userid]
 		return '{}!{}@{}'.format(
 			user['username'],
-			user['uid'],
+			user['id'],
 			self.irc.servername
 		)
+
 	def myuser(self):
 		return self.fulluser(self.sbs.userid)
 
@@ -263,87 +258,11 @@ class Bridge:
 				self.debug(message.message)
 				return
 
-		self.sbs.ws_send({
-			"type": "message",
-			"text": text,
-			"key": self.sbs.token,
-			"tag": tag
-		})
+		self.sbs.send_message(int(tag), text)
 
 	def sbs_on_message(self, data):
-		# Attempt to decode
-		if hasattr(decoders, 'decode_' + data['encoding']):
-			decoder = getattr(decoders, 'decode_' + data['encoding'])
-			message = decoder(data['message'])
-		else:
-			self.debug('Unknown encoding: {}'.format(data['encoding']))
-			message = data['message']
-
-		# Call the appropriate handler
-		if hasattr(self, 'sbs_msg_' + data['type'] + '_' + data['subtype']):
-			handler = getattr(self, 'sbs_msg_' + data['type'] + '_' + data['subtype'])
-			handler(data, message)
-		else:
-			self.debug('Unknown message type:')
-			self.debug(data)
-
-	def sbs_msg_message_none(self, data, message):
-		# Ignore messages sent by yourself
-		if data['sender']['uid'] == self.sbs.userid:
-			return
-
-		# Make greentext green
-		if message.startswith('>'):
-			message = '\x033' + message
-
-		# TODO: handle 'any'
-		self.irc.send_cmd(self.fulluser(data['sender']['uid']),
-			'PRIVMSG', ['#' + data['tag']], message)
-
-	def sbs_msg_module_none(self, data, message):
-		if data['module'] == 'pm':
-			# Ignore pms sent by yourself
-			# TODO: don't do this for the initial message log?
-			if data['sender']['uid'] == self.sbs.userid:
-				return
-
-			# Find sender and recipient
-			sender = data['sender']['uid']
-			data['recipients'].remove(sender)
-			if len(data['recipients']) != 1:
-				self.debug('ERROR: multiple recipients for PM!')
-				self.debug(data)
-				return
-			recipient = data['recipients'][0]
-
-			# Send the message from the sender to the recipient
-			# Skip the first line to ignore the module generated src/dest
-			for line in message.splitlines()[1:]:
-				self.irc.send_cmd(self.fulluser(sender), 'PRIVMSG',
-					[self.sbs.users[recipient]['username']], line)
-		elif data['module'] == 'fun':
-			# Ignore /me message sent by yourself
-			if data['sender']['uid'] == self.sbs.userid:
-				return
-
-			# Format the message for /me
-			# TODO: make sure user is in channel
-			# TODO: handle 'any'
-			message = message.split(' ', 1)[1]
-			self.irc.send(
-				text=message,
-				prefix=':{} PRIVMSG #{} :\x01ACTION '.format(
-					self.fulluser(data['sender']['uid']),
-					data['tag']
-				),
-				suffix='\x01'
-			)
-		elif data['module'] == 'global':
-			self.irc.send_cmd(self.servername,
-				'NOTICE', [self.nickname], message)
-		else:
-			self.debug('Unkown module message')
-			self.debug(data)
+		self.irc.send_cmd(self.fulluser(data['createUserId']),
+			'PRIVMSG', ['#' + str(data['parentId'])], data['content'])
 
 	# Ignore system generated join and leave messages
 	def sbs_msg_system_join(self, data, message): pass
