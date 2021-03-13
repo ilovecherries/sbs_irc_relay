@@ -57,8 +57,9 @@ class Bridge:
 		# TODO: properly report user rank for client
 
 		for uid in self.channels[channel]:
+			print(self.sbs.users)
 			user = self.sbs.users[uid]
-			rank = ['', '+'][user['level']] if user['level'] < 2 else '@'
+			rank = ['', '+'][user['super']] if user['super'] < 2 else '@'
 			self.send_numeric(irc.RPL_NAMREPLY, ['=', channel],
 				rank + user['username'])
 		self.send_numeric(irc.RPL_ENDOFNAMES, [channel],
@@ -98,9 +99,9 @@ class Bridge:
 
 				# Apply appropriate user mode
 				user = self.sbs.users[uid]
-				if user['super'] == True:
+				if user['super'] == False:
 					self.send_mode(channel, '+v', user['username'])
-				elif user['super'] == False:
+				elif user['super'] == True:
 					self.send_mode(channel, '+o', user['username'])
 
 			# Users that don't exist who did before
@@ -197,14 +198,14 @@ class Bridge:
 		channel = message.params[0]
 		for uid in self.channels[channel]:
 			user = self.sbs.users[uid]
-			rank = ['', '+'][user['level']] if user['level'] < 2 else '@'
+			rank = ['', '+'][user['super']] if user['super'] < 2 else '@'
 			self.send_numeric(irc.RPL_WHOREPLY, [
 				channel,             # channel
-				user['uid'],         # user
+				user['id'],         # user
 				self.irc.servername, # host
 				self.irc.servername, # server
 				user['username'],    # nick
-				('H' if user['active'] else 'G') + rank,
+				'G' + rank,
 				':0',                # hopcount
 				user['username']     # real_name
 			])
@@ -261,8 +262,10 @@ class Bridge:
 		self.sbs.send_message(int(tag), text)
 
 	def sbs_on_message(self, data):
-		self.irc.send_cmd(self.fulluser(data['createUserId']),
-			'PRIVMSG', ['#' + str(data['parentId'])], data['content'])
+		# ignore message if self
+		if data['createUserId'] != self.sbs.userid:
+			self.irc.send_cmd(self.fulluser(data['createUserId']),
+				'PRIVMSG', ['#' + str(data['parentId'])], data['content'])
 
 	# Ignore system generated join and leave messages
 	def sbs_msg_system_join(self, data, message): pass

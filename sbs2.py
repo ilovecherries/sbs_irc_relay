@@ -63,7 +63,6 @@ class SBS2:
         self.api_url = 'https://smilebasicsource.com/api/'
         self.users = {}
         self.rooms = {}
-        self.userid = 12
 
         self.message_ids = []
         self.tags = []
@@ -84,6 +83,16 @@ class SBS2:
         if not self.authtoken:
             raise Exception()
 
+        # for self-identification
+        selfuser = requests.get(
+            f'{self.api_url}User/me', 
+            headers={'Authorization': f'Bearer {self.authtoken}'}
+        ).json()
+        self.userid = selfuser['id']
+        self.users.update({
+            selfuser['id']: selfuser 
+        })
+
         self.longpoller = SBS2MessageLongPoller(
             self.api_url,
             self.poll_message,
@@ -102,7 +111,10 @@ class SBS2:
         })
         # update channels?
         self.rooms.update({
-            content['id']: {}
+            content['id']: {
+                user 
+                for user in self.users.keys()
+            }
             for content in data['chains']['content']
         })
         self.on_userList(0)
