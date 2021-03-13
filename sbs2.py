@@ -39,16 +39,22 @@ class SBS2MessageLongPoller:
         """Infinite event loop that will send data if successful"""
         headers={'Authorization': f'Bearer {self.authtoken}'}
         while True:
-            listener_settings = {
-                'lastId': self.last_id,
-                'chains': ['comment.0id', 'user.1createUserId', 'content.1parentId']
-            }
-            r = requests.get(
-                f"{self.api_url}Read/listen?actions=" +
-                json.dumps(listener_settings, separators=(',', ':')),
-                headers=headers
-            )
-            data = r.json()
+            data = {}
+            try:
+                listener_settings = {
+                    'lastId': self.last_id,
+                    'chains': ['comment.0id', 'user.1createUserId', 'content.1parentId']
+                }
+                r = requests.get(
+                    f"{self.api_url}Read/listen?actions=" +
+                    json.dumps(listener_settings, separators=(',', ':')),
+                    headers=headers
+                )
+                data = r.json()
+            except requests.exceptions.Timeout:
+                pass
+            except json.decoder.JSONDecodeError:
+                pass
             self.last_id = data['lastId']
             self.callback(data)
 
