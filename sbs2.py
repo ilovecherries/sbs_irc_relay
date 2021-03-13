@@ -85,6 +85,24 @@ class SBS2:
         for i in data['chains']['comment']:
             print(i['content'])
     
+    def send_message(self, room_id, content):
+        settings = {
+            'm': '12y'
+        }
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.authtoken}'
+        }
+        requests.post(
+            f'{self.api_url}Comment', 
+            headers=headers, 
+            json={
+                'parentId': int(room_id),
+                'content': json.dumps(settings)+'\n'+content
+            }
+        )
+        pass
+
 # this was just for testing, this won't be how it's actually used
 sbs2 = SBS2()
 sbs2.authtoken = '[AUTH TOKEN]'
