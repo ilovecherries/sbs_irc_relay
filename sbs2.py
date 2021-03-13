@@ -52,9 +52,9 @@ class SBS2MessageLongPoller:
                 )
                 data = r.json()
             except requests.exceptions.Timeout:
-                pass
+                continue
             except json.decoder.JSONDecodeError:
-                pass
+                continue
             self.last_id = data['lastId']
             self.callback(data)
 
